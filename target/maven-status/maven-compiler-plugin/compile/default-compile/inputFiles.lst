@@ -1,0 +1,16 @@
+/src/src/main/java/co/gov/redvital/notificaciones/NotificacionesApplication.java
+/src/src/main/java/co/gov/redvital/notificaciones/aplicacion/Aviso.java
+/src/src/main/java/co/gov/redvital/notificaciones/aplicacion/CanalCorreoPort.java
+/src/src/main/java/co/gov/redvital/notificaciones/aplicacion/ContactosPort.java
+/src/src/main/java/co/gov/redvital/notificaciones/aplicacion/EntregarAviso.java
+/src/src/main/java/co/gov/redvital/notificaciones/aplicacion/FalloEntrega.java
+/src/src/main/java/co/gov/redvital/notificaciones/aplicacion/Plantillas.java
+/src/src/main/java/co/gov/redvital/notificaciones/aplicacion/Resultado.java
+/src/src/main/java/co/gov/redvital/notificaciones/infraestructura/configuracion/CasosDeUsoConfig.java
+/src/src/main/java/co/gov/redvital/notificaciones/infraestructura/configuracion/PropiedadesNotificaciones.java
+/src/src/main/java/co/gov/redvital/notificaciones/infraestructura/correo/CanalSmtp.java
+/src/src/main/java/co/gov/redvital/notificaciones/infraestructura/correo/ClasificadorSmtp.java
+/src/src/main/java/co/gov/redvital/notificaciones/infraestructura/correo/ConfiguracionCorreo.java
+/src/src/main/java/co/gov/redvital/notificaciones/infraestructura/donacion/ClienteContactosDonacion.java
+/src/src/main/java/co/gov/redvital/notificaciones/infraestructura/mensajeria/ConsumidorAvisos.java
+/src/src/main/java/co/gov/redvital/notificaciones/infraestructura/mensajeria/KafkaConfig.java

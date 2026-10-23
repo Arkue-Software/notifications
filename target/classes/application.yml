@@ -1,0 +1,105 @@
+# RedVital — Trabajador de Notificaciones.
+# Los secretos llegan como archivos en /run/secrets (configtree): cada archivo
+# se lee como la propiedad de su mismo nombre. Nunca se escriben aquí.
+server:
+  # Solo la sonda de salud y las métricas; el contenedor no publica puertos.
+  port: ${PUERTO_GESTION:8081}
+  shutdown: graceful
+
+spring:
+  application:
+    name: redvital-notificaciones-worker
+  config:
+    import: optional:configtree:${REDVITAL_SECRETOS:/run/secrets/}
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVIDORES:localhost:9092}
+    security:
+      protocol: ${KAFKA_PROTOCOLO:SASL_PLAINTEXT}
+    properties:
+      sasl.mechanism: SCRAM-SHA-512
+      # Archivo /run/secrets/kafka_notificaciones
+      sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username="${KAFKA_USUARIO:notificaciones}" password="${kafka_notificaciones:}";
+    producer:
+      # Solo reenvía a los temas de reintento y de mensajes muertos.
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+    consumer:
+      group-id: notificaciones
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        # Con el canal caído el consumidor espera hasta 5 min entre intentos sin
+        # avanzar; este plazo es mayor para que no lo saquen del grupo mientras.
+        max.poll.interval.ms: 600000
+    listener:
+      missing-topics-fatal: false
+      ack-mode: record
+      auth-exception-retry-interval: 10s
+    admin:
+      auto-create: false
+      fail-fast: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    # Ni Kafka ni el proveedor de correo sacan al trabajador de servicio: si
+    # faltan, los avisos esperan en el tema.
+    kafka:
+      enabled: false
+    mail:
+      enabled: false
+
+redvital:
+  # Enlaces de los correos: el sitio del ambiente, p. ej. https://10.43.98.220.
+  sitio: ${SITIO_URL:https://localhost}
+  zona-horaria: America/Bogota
+  plazo: 3s
+  donacion:
+    url: ${DONACION_URL:http://donation-service:8080}
+  identidad:
+    url: ${IDENTIDAD_URL:http://identity-service:8080}
+    cliente: notificaciones
+    # Archivo /run/secrets/notificaciones_secreto_identidad
+    secreto: ${notificaciones_secreto_identidad:}
+  correo:
+    host: ${SMTP_HOST:smtp.gmail.com}
+    puerto: ${SMTP_PUERTO:587}
+    usuario: ${SMTP_USUARIO:}
+    # Archivo /run/secrets/notificaciones_smtp_clave: la contraseña de aplicación de Gmail.
+    clave: ${notificaciones_smtp_clave:}
+    starttls: ${SMTP_STARTTLS:true}
+    remitente: ${SMTP_REMITENTE:}
+    nombre-remitente: RedVital
+  reintentos:
+    # Rechazos: temas de reintento, 8 intentos con esperas de 15 s a 5 min (DD, Tabla 17).
+    espera-inicial: 15000
+    espera-maxima: 300000
+    # Canal no disponible: el mismo aviso, en el sitio, de 15 s a 5 min, sin límite.
+    espera-canal: 15s
+    espera-canal-maxima: 5m
+
+logging:
+  pattern:
+    correlation: "[%X{correlacion_id:-}] "
+  level:
+    # Al sumar la cabecera aviso-resultado a las de reintento, Spring compone las dos
+    # funciones y avisa que «reemplaza» la suya en cada contenedor: es inofensivo.
+    org.springframework.kafka.listener.DeadLetterRecordManager: error

@@ -1,0 +1,3 @@
+/src/src/test/java/co/gov/redvital/notificaciones/aplicacion/EntregarAvisoTest.java
+/src/src/test/java/co/gov/redvital/notificaciones/infraestructura/correo/ClasificadorSmtpTest.java
+/src/src/test/java/co/gov/redvital/notificaciones/integracion/NotificacionesIntegracionTest.java
