@@ -2,21 +2,28 @@ package co.gov.redvital.notificaciones.infraestructura.persistencia;
 
 import co.gov.redvital.notificaciones.aplicacion.NotificacionPersistenciaPort;
 import co.gov.redvital.notificaciones.aplicacion.RegistroIdempotencia;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Component;
 
-@Repository
-class NotificacionPersistenciaJpaAdapter implements NotificacionPersistenciaPort {
+@Component
+public class NotificacionPersistenciaJpaAdapter implements NotificacionPersistenciaPort {
 
-    private final NotificacionJpaRepository repositorio;
+    private final NotificacionJpaRepository repository;
 
-    NotificacionPersistenciaJpaAdapter(NotificacionJpaRepository repositorio) {
-        this.repositorio = repositorio;
+    public NotificacionPersistenciaJpaAdapter(NotificacionJpaRepository repository) {
+        this.repository = repository;
     }
 
     @Override
     public void guardar(RegistroIdempotencia registro) {
-        var entidad = new BandejaIdempotenciaEntity(registro.claveIdempotencia(), registro.eventoOrigen(),
-                registro.avisoId(), registro.resultado());
-        repositorio.save(entidad);
+        // Usamos la entidad de idempotencia que ya existe en tu proyecto
+        BandejaIdempotenciaEntity entity = new BandejaIdempotenciaEntity();
+        
+        // Mapeo desde el Record de Dominio a la Entidad JPA
+        entity.setClaveIdempotencia(registro.claveIdempotencia());
+        entity.setEventoOrigen(registro.eventoOrigen());
+        entity.setAvisoId(registro.avisoId());
+        entity.setResultado(registro.resultado());
+
+        repository.save(entity);
     }
 }
