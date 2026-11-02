@@ -73,11 +73,11 @@ public final class Plantillas {
         List<String> parrafos = new ArrayList<>();
         String nombre = datos.get("nombre");
         if (nombre != null) {
-            parrafos.add("Se publicó la jornada «" + nombre + "»" + (datos.get("sede") == null ? "." : ", en " + datos.get("sede") + "."));
+            parrafos.add(oracion("Se publicó la jornada «" + nombre + "»" + (datos.get("sede") == null ? "" : ", en " + datos.get("sede"))));
             String inicia = fecha(datos.get("inicia_en"));
             String termina = fecha(datos.get("termina_en"));
             if (inicia != null && termina != null) {
-                parrafos.add("Va desde el " + inicia + " hasta el " + termina + ".");
+                parrafos.add(oracion("Va desde el " + inicia + " hasta el " + termina));
             }
         } else {
             parrafos.add("Se publicó una jornada de donación de sangre cerca de ti.");
@@ -93,6 +93,11 @@ public final class Plantillas {
                 List.of("Recibes este aviso porque autorizaste los avisos de campañas. Puedes retirar esa autorización en tu perfil: "
                                 + sitio + "/donantes/perfil.",
                         AUTOMATICO));
+    }
+
+    /** Cierra la frase con punto, salvo que ya termine en uno (la hora termina en «p. m.»). */
+    private static String oracion(String frase) {
+        return frase.endsWith(".") ? frase : frase + ".";
     }
 
     /** Fecha y hora en la zona del ambiente; nula si el dato no es una fecha válida. */

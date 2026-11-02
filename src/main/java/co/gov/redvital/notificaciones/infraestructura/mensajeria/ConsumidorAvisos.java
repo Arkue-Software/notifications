@@ -116,8 +116,12 @@ class ConsumidorAvisos {
                 }
             });
             String campania = n.path("campania_id").asString(null);
-            return new Aviso(avisoId, tipo, destinatarioTipo, destinatario, campania == null ? null : uuid(campania),
-                    plantilla);
+            String correo = n.path("correo").asString(null);
+            if (correo != null && (correo.length() > 160 || !correo.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"))) {
+                throw malFormado("El correo del destinatario no es válido.");
+            }
+            return new Aviso(avisoId, tipo, destinatarioTipo, destinatario, correo, n.path("nombre").asString(null),
+                    campania == null ? null : uuid(campania), plantilla);
         } catch (JacksonException e) {
             throw malFormado("La carga no es JSON válido.");
         }

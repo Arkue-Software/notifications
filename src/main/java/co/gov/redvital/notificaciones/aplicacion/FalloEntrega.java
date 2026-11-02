@@ -25,7 +25,7 @@ public abstract sealed class FalloEntrega extends RuntimeException
     }
 
     /**
-     * El proveedor de correo, Donación o Identidad no responden. No es culpa
+     * El proveedor de correo no responde o no está configurado. No es culpa
      * del destinatario y no consume intentos.
      */
     public static final class CanalNoDisponible extends FalloEntrega {

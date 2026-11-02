@@ -17,8 +17,8 @@ import org.springframework.util.backoff.ExponentialBackOff;
 /**
  * Tratamiento de fallos del consumidor (DD, Tabla 17):
  * <ul>
- *   <li>{@code canal_no_disponible}: el proveedor de correo, Donación o
- *   Identidad no responden. El consumidor pausa y reintenta el mismo aviso
+ *   <li>{@code canal_no_disponible}: el proveedor de correo no responde o
+ *   no está configurado. El consumidor pausa y reintenta el mismo aviso
  *   con espera creciente desde 15 s hasta 5 min, sin límite: avanzar solo
  *   llenaría los temas de reintento con avisos que fallarían igual.</li>
  *   <li>Rechazos del destinatario o del proveedor: temas

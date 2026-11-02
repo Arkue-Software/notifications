@@ -17,12 +17,11 @@ class EntregarAvisoTest {
 
     private final List<CanalCorreoPort.Mensaje> enviados = new ArrayList<>();
 
-    private EntregarAviso conContacto(ContactosPort.Contacto contacto) {
-        return new EntregarAviso((id, tipo) -> contacto, PLANTILLAS, enviados::add);
-    }
+    private final EntregarAviso entregar = new EntregarAviso(PLANTILLAS, enviados::add);
 
-    private static Aviso aviso(String tipo, Map<String, String> plantilla) {
-        return new Aviso(UUID.randomUUID(), tipo, "donante", UUID.randomUUID(), null, plantilla);
+    /** El aviso ya trae el correo y el nombre: Donación los resolvió al decidirlo. */
+    private static Aviso aviso(String tipo, Map<String, String> plantilla, String correo, String nombre) {
+        return new Aviso(UUID.randomUUID(), tipo, "donante", UUID.randomUUID(), correo, nombre, null, plantilla);
     }
 
     @Nested
@@ -30,8 +29,8 @@ class EntregarAvisoTest {
 
         @Test
         void la_confirmacion_de_la_cuenta_lleva_el_saludo_el_enlace_al_sitio_y_lo_que_puede_hacer() {
-            Aviso aviso = aviso(Aviso.CUENTA_CREADA, Map.of());
-            var resultado = conContacto(new ContactosPort.Contacto(true, "laura@correo.co", "Laura Pérez")).ejecutar(aviso);
+            Aviso aviso = aviso(Aviso.CUENTA_CREADA, Map.of(), "laura@correo.co", "Laura Pérez");
+            var resultado = entregar.ejecutar(aviso);
 
             assertThat(resultado).isEqualTo(Resultado.ENTREGADO);
             assertThat(enviados).hasSize(1);
@@ -47,24 +46,26 @@ class EntregarAvisoTest {
         @Test
         void el_aviso_de_campania_muestra_la_jornada_y_sus_fechas_en_hora_de_Bogota() {
             Aviso aviso = aviso(Aviso.CAMPANIA_PUBLICADA, Map.of("nombre", "Jornada Ciudad Universitaria",
-                    "sede", "Bloque 22", "inicia_en", "2026-10-20T13:00:00Z", "termina_en", "2026-10-26T22:00:00Z"));
-            conContacto(new ContactosPort.Contacto(true, "laura@correo.co", "Laura")).ejecutar(aviso);
+                    "sede", "Bloque 22", "inicia_en", "2026-10-20T13:00:00Z", "termina_en", "2026-10-26T22:00:00Z"),
+                    "laura@correo.co", "Laura");
+            entregar.ejecutar(aviso);
 
             var m = enviados.getFirst();
             assertThat(m.asunto()).isEqualTo("Nueva jornada de donación: Jornada Ciudad Universitaria");
             assertThat(m.texto()).contains("«Jornada Ciudad Universitaria», en Bloque 22.",
                     "20 de octubre de 2026, 8:00", "26 de octubre de 2026, 5:00", "https://qa.redvital.test/donantes/perfil");
+            assertThat(m.texto()).as("sin punto doble tras «p. m.»").doesNotContain("..");
         }
 
         @Test
         void un_aviso_de_campania_sin_plantilla_sale_igual_con_un_texto_general() {
-            conContacto(new ContactosPort.Contacto(true, "laura@correo.co", "Laura")).ejecutar(aviso(Aviso.CAMPANIA_PUBLICADA, null));
+            entregar.ejecutar(aviso(Aviso.CAMPANIA_PUBLICADA, null, "laura@correo.co", "Laura"));
             assertThat(enviados.getFirst().asunto()).isEqualTo("Hay una nueva jornada de donación cerca de ti");
         }
 
         @Test
         void el_html_escapa_lo_que_viene_de_los_datos() {
-            conContacto(new ContactosPort.Contacto(true, "a@correo.co", "<b>Ana</b> & \"Co\"")).ejecutar(aviso(Aviso.CUENTA_CREADA, Map.of()));
+            entregar.ejecutar(aviso(Aviso.CUENTA_CREADA, Map.of(), "a@correo.co", "<b>Ana</b> & \"Co\""));
             assertThat(enviados.getFirst().html()).contains("&lt;b&gt;Ana&lt;/b&gt; &amp; &quot;Co&quot;").doesNotContain("<b>Ana");
         }
     }
@@ -73,8 +74,8 @@ class EntregarAvisoTest {
     class SinEnvio {
 
         @Test
-        void un_donante_no_contactable_es_un_resultado_terminal_sin_correo() {
-            var resultado = conContacto(new ContactosPort.Contacto(false, null, null)).ejecutar(aviso(Aviso.CUENTA_CREADA, Map.of()));
+        void un_aviso_sin_correo_es_un_resultado_terminal_sin_envio() {
+            var resultado = entregar.ejecutar(aviso(Aviso.CUENTA_CREADA, Map.of(), null, null));
             assertThat(resultado).isEqualTo(Resultado.DESTINATARIO_SIN_CONTACTO);
             assertThat(enviados).isEmpty();
         }
@@ -82,7 +83,7 @@ class EntregarAvisoTest {
         @Test
         void a_los_dominios_reservados_nunca_se_envia() {
             for (String correo : List.of("donante.1@redvital.test", "x@example.com", "y@algo.invalid", "z@sub.example")) {
-                var resultado = conContacto(new ContactosPort.Contacto(true, correo, "N")).ejecutar(aviso(Aviso.CUENTA_CREADA, Map.of()));
+                var resultado = entregar.ejecutar(aviso(Aviso.CUENTA_CREADA, Map.of(), correo, "N"));
                 assertThat(resultado).as(correo).isEqualTo(Resultado.DOMINIO_RESERVADO);
             }
             assertThat(enviados).isEmpty();
@@ -92,11 +93,10 @@ class EntregarAvisoTest {
 
         @Test
         void un_tipo_sin_plantilla_o_un_destinatario_institucional_es_un_defecto() {
-            var entregar = conContacto(new ContactosPort.Contacto(true, "a@correo.co", "A"));
-            assertThatThrownBy(() -> entregar.ejecutar(aviso("convocatoria", Map.of())))
+            assertThatThrownBy(() -> entregar.ejecutar(aviso("convocatoria", Map.of(), "a@correo.co", "A")))
                     .isInstanceOfSatisfying(FalloEntrega.AvisoInvalido.class, f -> assertThat(f.codigo()).isEqualTo("tipo_sin_plantilla"));
             assertThatThrownBy(() -> entregar.ejecutar(new Aviso(UUID.randomUUID(), Aviso.CUENTA_CREADA, "institucion",
-                    UUID.randomUUID(), null, Map.of())))
+                    UUID.randomUUID(), "a@correo.co", "A", null, Map.of())))
                     .isInstanceOfSatisfying(FalloEntrega.AvisoInvalido.class, f -> assertThat(f.codigo()).isEqualTo("destinatario_no_soportado"));
             assertThat(enviados).isEmpty();
         }

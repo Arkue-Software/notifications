@@ -1,13 +1,14 @@
 # Trabajador de Notificaciones (RedVital)
 
-Consume EV-02 `notice.requested` (tema `redvital.donacion.notice-requested.v1`, grupo `notificaciones`) y entrega cada aviso por correo (DD V3.0, Sección 9). No tiene base de datos ni rutas publicadas.
+Consume EV-02 `notice.requested` (tema `redvital.donacion.notice-requested.v1`, grupo `notificaciones`) y entrega cada aviso por correo (DD V3.0, Sección 9). No tiene base de datos ni rutas publicadas, y no llama a ningún servicio: todo lo que necesita viene en el evento.
 
 ## Ciclo de un aviso
 
-1. Lee el evento. Trae identificadores y datos no personales de la plantilla, nunca el correo.
-2. Pide el contacto a Donación (`GET /internal/v1/donantes/{id}/contacto?tipo=…`), con un token de servicio del cliente `notificaciones` que emite Identidad.
-3. Compone el correo con la plantilla del tipo, en texto y HTML, con los enlaces al sitio (`SITIO_URL`).
-4. Lo envía por SMTP. El Message-ID es `<aviso-{aviso_id}@redvital>`.
+1. Lee el evento: el tipo, el correo y el nombre del destinatario y los datos de la plantilla. Donación solo emite el aviso si el donante tiene correo y, para los avisos de campaña, si autorizó recibirlos.
+2. Compone el correo con la plantilla del tipo, en texto y HTML, con los enlaces al sitio (`SITIO_URL`).
+3. Lo envía por SMTP. El Message-ID es `<aviso-{aviso_id}@redvital>`.
+
+El tema de EV-02 lleva datos de contacto: solo lo lee este trabajador (las ACL niegan la lectura incluso a la inspección) y se borra a los siete días.
 
 Tipos con plantilla: `cuenta_creada` (confirmación del registro de un donante) y `campania_publicada`.
 
@@ -16,9 +17,9 @@ Tipos con plantilla: `cuenta_creada` (confirmación del registro de un donante) 
 | Resultado | Tratamiento |
 |---|---|
 | `entregado`, `destinatario_sin_contacto`, `dominio_reservado` | Terminales: se confirma la posición. `dominio_reservado` evita enviar a `.test`, `.example`, `.invalid` y `.localhost` (las cuentas de prueba de QA). |
-| `canal_no_disponible` | Gmail, Donación o Identidad no responden: se reintenta el mismo aviso de 15 s a 5 min, sin límite y sin avanzar. |
+| `canal_no_disponible` | El servidor de correo no responde: se reintenta el mismo aviso de 15 s a 5 min, sin límite y sin avanzar. |
 | `destinatario_rechazado`, `rechazo_proveedor` | Temas `….notificaciones.retry-0` a `-5`, ocho intentos en total, y luego `….notificaciones.dlt`. |
-| Aviso inválido (`evento_mal_formado`, `destinatario_inexistente`, `tipo_sin_plantilla`) | Directo a `….notificaciones.dlt`. |
+| Aviso inválido (`evento_mal_formado`, `tipo_sin_plantilla`) | Directo a `….notificaciones.dlt`. Un correo con formato inválido cuenta como mal formado. |
 
 Lo que va a mensajes muertos lleva la cabecera `aviso-resultado` y sube `redvital_eventos_mensajes_muertos_total`. Cada intento suma a `redvital_avisos_total{tipo,resultado}`.
 
@@ -30,7 +31,6 @@ Lo que va a mensajes muertos lleva la cabecera `aviso-resultado` y sube `redvita
 | `/run/secrets/notificaciones_smtp_clave` | Contraseña de aplicación de esa cuenta (se aceptan los espacios con que la muestra Gmail) |
 | `SMTP_HOST`, `SMTP_PUERTO`, `SMTP_STARTTLS` | Por defecto `smtp.gmail.com`, `587`, `true` |
 | `SITIO_URL` | Sitio del ambiente, para los enlaces (p. ej. `https://10.43.98.220`) |
-| `/run/secrets/notificaciones_secreto_identidad` | Credencial del cliente `notificaciones` ante Identidad |
 | `/run/secrets/kafka_notificaciones` | Usuario SCRAM `notificaciones` |
 
 ## Pruebas

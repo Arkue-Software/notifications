@@ -1,6 +1,5 @@
 package co.gov.redvital.notificaciones.infraestructura.configuracion;
 
-import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -12,17 +11,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record PropiedadesNotificaciones(
         @DefaultValue("https://localhost") String sitio,
         @DefaultValue("America/Bogota") String zonaHoraria,
-        @DefaultValue("3s") Duration plazo,
-        Servicio donacion,
-        Identidad identidad,
         Correo correo) {
-
-    public record Servicio(String url) {
-    }
-
-    /** Credencial del cliente notificaciones para pedir el token de servicio. */
-    public record Identidad(String url, @DefaultValue("notificaciones") String cliente, String secreto) {
-    }
 
     /** Proveedor SMTP. En QA, Gmail con una contraseña de aplicación. */
     public record Correo(@DefaultValue("smtp.gmail.com") String host, @DefaultValue("587") int puerto, String usuario,
