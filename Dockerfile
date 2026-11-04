@@ -15,9 +15,12 @@ FROM eclipse-temurin:25-jdk AS jre
 COPY --from=construccion /ext /ext
 # Módulos que pide el código, más los que se cargan por reflexión o por
 # proveedor de servicios: TLS (STARTTLS de Gmail), SCRAM de Kafka y métricas.
+# jdk.localedata trae los nombres en español de meses y horas («23 de octubre,
+# 8:00 a. m.»); sin él, los correos saldrían con las fechas en inglés.
 RUN MODULOS="$(jdeps --ignore-missing-deps -q --recursive --multi-release 25 --print-module-deps \
         --class-path '/ext/lib/*' /ext/*.jar 2>/dev/null || echo java.base)" \
- && jlink --add-modules "${MODULOS},java.desktop,java.instrument,java.management,java.naming,java.net.http,java.security.jgss,java.security.sasl,jdk.charsets,jdk.crypto.ec,jdk.management,jdk.naming.dns,jdk.unsupported,jdk.zipfs" \
+ && jlink --add-modules "${MODULOS},java.desktop,java.instrument,java.management,java.naming,java.net.http,java.security.jgss,java.security.sasl,jdk.charsets,jdk.crypto.ec,jdk.localedata,jdk.management,jdk.naming.dns,jdk.unsupported,jdk.zipfs" \
+        --include-locales=es,en \
         --strip-debug --no-man-pages --no-header-files --compress=zip-6 --output /jre
 COPY docker/Salud.java /salud/Salud.java
 RUN javac -d /salud /salud/Salud.java

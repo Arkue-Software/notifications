@@ -71,14 +71,6 @@ redvital:
   # Enlaces de los correos: el sitio del ambiente, p. ej. https://10.43.98.220.
   sitio: ${SITIO_URL:https://localhost}
   zona-horaria: America/Bogota
-  plazo: 3s
-  donacion:
-    url: ${DONACION_URL:http://donation-service:8080}
-  identidad:
-    url: ${IDENTIDAD_URL:http://identity-service:8080}
-    cliente: notificaciones
-    # Archivo /run/secrets/notificaciones_secreto_identidad
-    secreto: ${notificaciones_secreto_identidad:}
   correo:
     host: ${SMTP_HOST:smtp.gmail.com}
     puerto: ${SMTP_PUERTO:587}

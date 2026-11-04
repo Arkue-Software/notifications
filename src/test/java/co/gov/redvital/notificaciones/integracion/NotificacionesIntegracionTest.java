@@ -4,13 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.ServerSetup;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.mail.internet.MimeMessage;
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -19,7 +16,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import org.apache.kafka.clients.admin.Admin;
@@ -53,15 +49,11 @@ class NotificacionesIntegracionTest {
     private static final String TEMA = "redvital.donacion.notice-requested.v1";
     private static final String DLT = TEMA + ".notificaciones.dlt";
     private static final String SITIO = "https://qa.redvital.test";
-    private static final String TOKEN = "token-de-servicio-de-prueba";
 
     static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.3.1")
             .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
     static final int PUERTO_SMTP = puertoLibre();
     static volatile GreenMail smtp;
-    /** Respuesta de Donación por donante: estado y cuerpo. */
-    static final Map<UUID, Map.Entry<Integer, String>> CONTACTOS = new ConcurrentHashMap<>();
-    static final HttpServer SERVICIOS = sustitutoDeServicios();
 
     static {
         KAFKA.start();
@@ -73,10 +65,6 @@ class NotificacionesIntegracionTest {
     static void propiedades(DynamicPropertyRegistry r) {
         r.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
         r.add("spring.kafka.security.protocol", () -> "PLAINTEXT");
-        String servicios = "http://127.0.0.1:" + SERVICIOS.getAddress().getPort();
-        r.add("redvital.donacion.url", () -> servicios);
-        r.add("redvital.identidad.url", () -> servicios);
-        r.add("redvital.identidad.secreto", () -> "secreto-de-prueba");
         r.add("redvital.sitio", () -> SITIO);
         r.add("redvital.correo.host", () -> "127.0.0.1");
         r.add("redvital.correo.puerto", () -> PUERTO_SMTP);
@@ -96,7 +84,6 @@ class NotificacionesIntegracionTest {
 
     @AfterAll
     static void detener() {
-        SERVICIOS.stop(0);
         smtp.stop();
     }
 
@@ -104,8 +91,7 @@ class NotificacionesIntegracionTest {
     void confirma_la_cuenta_por_correo_con_el_enlace_al_sitio() throws Exception {
         UUID donante = UUID.randomUUID();
         String correo = "laura." + donante.toString().substring(0, 8) + "@correo.co";
-        CONTACTOS.put(donante, Map.entry(200, "{\"contactable\":true,\"correo\":\"" + correo + "\",\"nombre\":\"Laura Pérez\"}"));
-        UUID aviso = publicar(donante, "cuenta_creada", "{}");
+        UUID aviso = publicar(donante, "cuenta_creada", "{}", correo, "Laura Pérez");
 
         MimeMessage mensaje = esperarCorreo(correo);
         assertThat(mensaje.getSubject()).isEqualTo("Tu cuenta de donante en RedVital está lista");
@@ -119,14 +105,10 @@ class NotificacionesIntegracionTest {
     }
 
     @Test
-    void sin_contacto_o_con_un_dominio_reservado_no_se_envia_nada_y_no_es_un_fallo() throws Exception {
-        UUID sinContacto = UUID.randomUUID();
-        CONTACTOS.put(sinContacto, Map.entry(200, "{\"contactable\":false}"));
-        UUID reservado = UUID.randomUUID();
-        CONTACTOS.put(reservado, Map.entry(200, "{\"contactable\":true,\"correo\":\"donante.1@redvital.test\",\"nombre\":\"N\"}"));
+    void sin_correo_o_con_un_dominio_reservado_no_se_envia_nada_y_no_es_un_fallo() throws Exception {
         int antes = smtp.getReceivedMessages().length;
-        UUID avisoSinContacto = publicar(sinContacto, "cuenta_creada", "{}");
-        UUID avisoReservado = publicar(reservado, "cuenta_creada", "{}");
+        UUID avisoSinContacto = publicar(UUID.randomUUID(), "cuenta_creada", "{}", null, null);
+        UUID avisoReservado = publicar(UUID.randomUUID(), "cuenta_creada", "{}", "donante.1@redvital.test", "N");
 
         esperar(() -> contador("cuenta_creada", "destinatario_sin_contacto") >= 1
                 && contador("cuenta_creada", "dominio_reservado") >= 1);
@@ -136,10 +118,10 @@ class NotificacionesIntegracionTest {
     }
 
     @Test
-    void un_destinatario_que_donacion_no_reconoce_va_directo_a_mensajes_muertos() {
-        UUID aviso = publicar(UUID.randomUUID(), "cuenta_creada", "{}"); // el sustituto responde 404
+    void un_aviso_con_un_correo_mal_escrito_va_directo_a_mensajes_muertos() {
+        UUID aviso = publicar(UUID.randomUUID(), "cuenta_creada", "{}", "esto no es un correo", "N");
         ConsumerRecord<String, String> muerto = esperarEn(DLT, aviso);
-        assertThat(cabecera(muerto, "aviso-resultado")).isEqualTo("destinatario_inexistente");
+        assertThat(cabecera(muerto, "aviso-resultado")).isEqualTo("evento_mal_formado");
         assertThat(llega(TEMA + ".notificaciones.retry-0", aviso, Duration.ofSeconds(2))).as("sin reintentos").isFalse();
     }
 
@@ -152,9 +134,8 @@ class NotificacionesIntegracionTest {
 
     @Test
     void un_destinatario_rechazado_recorre_los_temas_de_reintento_y_termina_en_mensajes_muertos() {
-        UUID donante = UUID.randomUUID();
-        CONTACTOS.put(donante, Map.entry(200, "{\"contactable\":true,\"correo\":\"esto no es un correo\",\"nombre\":\"N\"}"));
-        UUID aviso = publicar(donante, "cuenta_creada", "{}");
+        // Pasa la forma del contrato, pero el canal la rechaza: dos puntos seguidos.
+        UUID aviso = publicar(UUID.randomUUID(), "cuenta_creada", "{}", "ana..b@correo.co", "N");
 
         ConsumerRecord<String, String> muerto = esperarEn(DLT, aviso);
         assertThat(cabecera(muerto, "aviso-resultado")).isEqualTo("destinatario_rechazado");
@@ -169,10 +150,9 @@ class NotificacionesIntegracionTest {
     void con_el_correo_caido_el_aviso_espera_y_se_entrega_cuando_vuelve() throws Exception {
         UUID donante = UUID.randomUUID();
         String correo = "espera." + donante.toString().substring(0, 8) + "@correo.co";
-        CONTACTOS.put(donante, Map.entry(200, "{\"contactable\":true,\"correo\":\"" + correo + "\",\"nombre\":\"Ana\"}"));
         smtp.stop();
         try {
-            UUID aviso = publicar(donante, "cuenta_creada", "{}");
+            UUID aviso = publicar(donante, "cuenta_creada", "{}", correo, "Ana");
             esperar(() -> contador("cuenta_creada", "canal_no_disponible") >= 2);
             assertThat(llega(TEMA + ".notificaciones.retry-0", aviso, Duration.ofSeconds(1))).isFalse();
             assertThat(llega(DLT, aviso, Duration.ofSeconds(1))).isFalse();
@@ -186,9 +166,8 @@ class NotificacionesIntegracionTest {
     void el_aviso_de_campania_lleva_la_jornada() throws Exception {
         UUID donante = UUID.randomUUID();
         String correo = "campania." + donante.toString().substring(0, 8) + "@correo.co";
-        CONTACTOS.put(donante, Map.entry(200, "{\"contactable\":true,\"correo\":\"" + correo + "\",\"nombre\":\"Ana\"}"));
         publicar(donante, "campania_publicada", "{\"nombre\":\"Jornada Parque Explora\",\"sede\":\"Plazoleta\","
-                + "\"inicia_en\":\"2026-10-28T13:00:00Z\",\"termina_en\":\"2026-10-29T22:00:00Z\"}");
+                + "\"inicia_en\":\"2026-10-28T13:00:00Z\",\"termina_en\":\"2026-10-29T22:00:00Z\"}", correo, "Ana");
         assertThat(esperarCorreo(correo).getSubject()).isEqualTo("Nueva jornada de donación: Jornada Parque Explora");
     }
 
@@ -199,11 +178,14 @@ class NotificacionesIntegracionTest {
         return c == null ? 0 : c.count();
     }
 
-    private static UUID publicar(UUID donante, String tipo, String plantilla) {
+    /** EV-02 como lo publica Donación: con el correo y el nombre del destinatario. */
+    private static UUID publicar(UUID donante, String tipo, String plantilla, String correo, String nombre) {
         UUID aviso = UUID.randomUUID();
         enviar(aviso, donante.toString(), "{\"aviso_id\":\"" + aviso + "\",\"tipo_aviso\":\"" + tipo
                 + "\",\"destinatario_tipo\":\"donante\",\"destinatario_id\":\"" + donante
-                + "\",\"campania_id\":null,\"plantilla\":" + plantilla + ",\"generado_en\":\"" + Instant.now() + "\"}");
+                + "\",\"correo\":" + (correo == null ? "null" : "\"" + correo + "\"")
+                + ",\"nombre\":" + (nombre == null ? "null" : "\"" + nombre + "\"")
+                + ",\"campania_id\":null,\"plantilla\":" + plantilla + ",\"generado_en\":\"" + Instant.now() + "\"}");
         return aviso;
     }
 
@@ -313,40 +295,6 @@ class NotificacionesIntegracionTest {
         servidor.setUser("redvital.qa@correo.co", "redvital.qa@correo.co", "abcdefghijklmnop");
         servidor.start();
         return servidor;
-    }
-
-    /** Identidad (token de servicio) y Donación (contacto del donante), en un solo servidor HTTP. */
-    private static HttpServer sustitutoDeServicios() {
-        try {
-            HttpServer servidor = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            servidor.createContext("/internal/v1/sesiones/servicio", ex -> responder(ex, 200,
-                    "{\"token_acceso\":\"" + TOKEN + "\",\"expira_en\":900}"));
-            servidor.createContext("/internal/v1/donantes/", ex -> {
-                if (!("Bearer " + TOKEN).equals(ex.getRequestHeaders().getFirst("Authorization"))) {
-                    responder(ex, 401, "{}");
-                    return;
-                }
-                String[] partes = ex.getRequestURI().getPath().split("/");
-                var respuesta = CONTACTOS.get(UUID.fromString(partes[4]));
-                if (respuesta == null) {
-                    responder(ex, 404, "{\"tipo\":\"no-encontrado\"}");
-                } else {
-                    responder(ex, respuesta.getKey(), respuesta.getValue());
-                }
-            });
-            servidor.start();
-            return servidor;
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    private static void responder(HttpExchange ex, int estado, String cuerpo) throws IOException {
-        byte[] bytes = cuerpo.getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().add("Content-Type", "application/json");
-        ex.sendResponseHeaders(estado, bytes.length);
-        ex.getResponseBody().write(bytes);
-        ex.close();
     }
 
     private static int puertoLibre() {

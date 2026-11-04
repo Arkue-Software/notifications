@@ -6,7 +6,7 @@ package co.gov.redvital.notificaciones.aplicacion;
  */
 public enum Resultado {
     ENTREGADO("entregado"),
-    /** Donación responde que el donante no es contactable: no es un fallo, no se reintenta. */
+    /** El aviso no trae correo: el donante no dejó uno. No es un fallo, no se reintenta. */
     DESTINATARIO_SIN_CONTACTO("destinatario_sin_contacto"),
     /**
      * El correo es de un dominio reservado que no recibe correo (.test,
