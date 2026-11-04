@@ -6,8 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 /**
  * Trabajador de Notificaciones (ST1; DD, Sección 9). Consume EV-02
- * {@code notice.requested} y entrega cada aviso por correo. No tiene base de
- * datos ni rutas publicadas: el estado de un aviso es su posición en el tema.
+ * {@code notice.requested}, entrega los avisos por correo y permite persistir
+ * registros de idempotencia en PostgreSQL. No publica rutas de negocio.
  */
 @SpringBootApplication
 @ConfigurationPropertiesScan
