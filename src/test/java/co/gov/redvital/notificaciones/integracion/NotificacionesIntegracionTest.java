@@ -2,6 +2,8 @@ package co.gov.redvital.notificaciones.integracion;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import co.gov.redvital.notificaciones.aplicacion.NotificacionPersistenciaPort;
+import co.gov.redvital.notificaciones.aplicacion.RegistroIdempotencia;
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.ServerSetup;
 import io.micrometer.core.instrument.Counter;
@@ -10,6 +12,9 @@ import jakarta.mail.internet.MimeMessage;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
@@ -29,6 +34,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +42,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.kafka.KafkaContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.MountableFile;
 
 /**
  * El trabajador de punta a punta contra Kafka real (Testcontainers), un
@@ -50,13 +58,19 @@ class NotificacionesIntegracionTest {
     private static final String DLT = TEMA + ".notificaciones.dlt";
     private static final String SITIO = "https://qa.redvital.test";
 
+    private static final String CLAVE_PROPIETARIO = "propietario-prueba";
+    private static final String CLAVE_SERVICIO = "servicio-prueba";
+
     static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.3.1")
             .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16").withDatabaseName("db_notifications");
     static final int PUERTO_SMTP = puertoLibre();
     static volatile GreenMail smtp;
 
     static {
         KAFKA.start();
+        POSTGRES.start();
+        prepararBase();
         crearTemas();
         smtp = iniciarSmtp();
     }
@@ -65,6 +79,13 @@ class NotificacionesIntegracionTest {
     static void propiedades(DynamicPropertyRegistry r) {
         r.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
         r.add("spring.kafka.security.protocol", () -> "PLAINTEXT");
+        // Como en el despliegue: el rol de servicio, con las migraciones reales. Aquí sí se
+        // valida el mapeo contra el esquema, que en ejecución no se exige para arrancar.
+        r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        r.add("spring.datasource.username", () -> "notifications_servicio");
+        r.add("spring.datasource.password", () -> CLAVE_SERVICIO);
+        r.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
+        r.add("spring.jpa.properties.hibernate.boot.allow_jdbc_metadata_access", () -> "true");
         r.add("redvital.sitio", () -> SITIO);
         r.add("redvital.correo.host", () -> "127.0.0.1");
         r.add("redvital.correo.puerto", () -> PUERTO_SMTP);
@@ -80,11 +101,31 @@ class NotificacionesIntegracionTest {
     }
 
     @Autowired
+    NotificacionPersistenciaPort persistencia;
+
+    @Autowired
     MeterRegistry metricas;
 
     @AfterAll
     static void detener() {
         smtp.stop();
+    }
+
+    @Test
+    void el_rol_de_servicio_guarda_en_la_bandeja_de_idempotencia() throws Exception {
+        String clave = "prueba-" + UUID.randomUUID();
+
+        persistencia.guardar(new RegistroIdempotencia(clave, "notice.requested", null, Map.of("resultado", "entregado")));
+
+        try (var conexion = DriverManager.getConnection(POSTGRES.getJdbcUrl(), "notifications_servicio", CLAVE_SERVICIO);
+             var consulta = conexion.prepareStatement(
+                     "SELECT resultado ->> 'resultado' FROM notifications.bandeja_idempotencia WHERE clave_idempotencia = ?")) {
+            consulta.setString(1, clave);
+            try (var filas = consulta.executeQuery()) {
+                assertThat(filas.next()).isTrue();
+                assertThat(filas.getString(1)).isEqualTo("entregado");
+            }
+        }
     }
 
     @Test
@@ -274,6 +315,32 @@ class NotificacionesIntegracionTest {
             }
         }
         throw new AssertionError("La condición no se cumplió en 45 segundos");
+    }
+
+    /** Roles y migraciones del repositorio de bases: los mismos que aplica el despliegue. */
+    private static void prepararBase() {
+        try {
+            Path dir = Path.of(System.getProperty("redvital.migraciones.dir",
+                    "../../../BDs_RedVital/databases/notifications")).toAbsolutePath().normalize();
+            if (!Files.isDirectory(dir.resolve("migraciones"))) {
+                throw new IllegalStateException("No se encontraron las migraciones en " + dir);
+            }
+            POSTGRES.copyFileToContainer(MountableFile.forHostPath(dir.resolve("00_roles.sql")), "/tmp/00_roles.sql");
+            var resultado = POSTGRES.execInContainer("psql", "-U", POSTGRES.getUsername(), "-d", "db_notifications",
+                    "-v", "password_propietario=" + CLAVE_PROPIETARIO, "-v", "password_servicio=" + CLAVE_SERVICIO,
+                    "-f", "/tmp/00_roles.sql");
+            if (resultado.getExitCode() != 0) {
+                throw new IllegalStateException("Falló 00_roles.sql: " + resultado.getStderr());
+            }
+            Flyway.configure()
+                    .dataSource(POSTGRES.getJdbcUrl(), "notifications_propietario", CLAVE_PROPIETARIO)
+                    .locations("filesystem:" + dir.resolve("migraciones"))
+                    .validateMigrationNaming(true)
+                    .load()
+                    .migrate();
+        } catch (Exception e) {
+            throw new IllegalStateException("No fue posible preparar la base de pruebas", e);
+        }
     }
 
     private static void crearTemas() {

@@ -1,6 +1,6 @@
 # Trabajador de Notificaciones (RedVital)
 
-Consume EV-02 `notice.requested` (tema `redvital.donacion.notice-requested.v1`, grupo `notificaciones`) y entrega cada aviso por correo (DD V3.0, Sección 9). No tiene base de datos ni rutas publicadas, y no llama a ningún servicio: todo lo que necesita viene en el evento.
+Consume EV-02 `notice.requested` (tema `redvital.donacion.notice-requested.v1`, grupo `notificaciones`) y entrega cada aviso por correo (DD V3.0, Sección 9). No tiene rutas publicadas y no llama a ningún servicio: todo lo que necesita para entregar un aviso viene en el evento. Su base `db_notifications` (esquema en el repo `databases`) tiene el modelo de avisos y la bandeja de idempotencia; el trabajador arranca y entrega aunque esa base no responda.
 
 ## Ciclo de un aviso
 
@@ -32,6 +32,8 @@ Lo que va a mensajes muertos lleva la cabecera `aviso-resultado` y sube `redvita
 | `SMTP_HOST`, `SMTP_PUERTO`, `SMTP_STARTTLS` | Por defecto `smtp.gmail.com`, `587`, `true` |
 | `SITIO_URL` | Sitio del ambiente, para los enlaces (p. ej. `https://10.43.98.220`) |
 | `/run/secrets/kafka_notificaciones` | Usuario SCRAM `notificaciones` |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_PARAMETROS` | Conexión a `db_notifications`. En QA y producción, `DB_PARAMETROS` exige TLS (`sslmode=verify-ca&sslrootcert=/run/secrets/postgres_ca`) |
+| `/run/secrets/notifications_servicio` | Contraseña del rol `notifications_servicio` |
 
 ## Pruebas
 
@@ -39,4 +41,4 @@ Lo que va a mensajes muertos lleva la cabecera `aviso-resultado` y sube `redvita
 mvn -B verify
 ```
 
-Las de integración levantan Kafka con Testcontainers y un servidor SMTP en memoria (GreenMail); en este equipo se corren con `Despliegue_RedVital/pruebas/correr-pruebas.sh notificaciones`.
+Las de integración levantan Kafka y PostgreSQL con Testcontainers, con las migraciones reales del repo `databases`, y un servidor SMTP en memoria (GreenMail); en este equipo se corren con `Despliegue_RedVital/pruebas/correr-pruebas.sh notificaciones`.
